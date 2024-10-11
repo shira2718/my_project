@@ -1,68 +1,51 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイムデータグラフ</title>
+    <title>CSV Data Chart</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-        let myChart;
-
-        async function fetchData() {
-            try {
-                const response = await fetch('http://localhost:5000/data');
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                const data = await response.json();
-
-                // データをグラフ用に加工
-                const labels = data.map(item => item.column1); // column1をラベルに
-                const values = data.map(item => item.column3); // column3を値に
-
-                updateChart(labels, values);
-            } catch (error) {
-                console.error('Fetch error:', error);
-            }
-        }
-
-        function updateChart(labels, values) {
-            if (myChart) {
-                myChart.data.labels = labels;
-                myChart.data.datasets[0].data = values;
-                myChart.update();
-            } else {
-                const ctx = document.getElementById('myChart').getContext('2d');
-                myChart = new Chart(ctx, {
-                    type: 'line', // グラフの種類
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'データセット',
-                            data: values,
-                            borderColor: 'rgba(75, 192, 192, 1)',
-                            borderWidth: 1,
-                            fill: false
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
-        // 定期的にデータを取得 (1秒ごと)
-        setInterval(fetchData, 1000); // 1秒ごとにデータを取得
-    </script>
 </head>
 <body>
-    <h1>リアルタイムデータグラフ</h1>
+    <h1>CSV Data Chart</h1>
     <canvas id="myChart" width="400" height="200"></canvas>
+
+<script>
+    // MySQLからデータを取得
+    //fetch('/data')
+	fetch('http://127.0.0.1:5000/data')  // 完全なURLを指定
+    .then(response => response.json())
+    .then(data => {
+        console.log(data);  // デバッグ用にデータを表示
+
+        // データをグラフ用に整形
+        const labels = data.map(item => item.column1);  // column1をラベルとして使用
+        const values = data.map(item => item.column3);  // column3を値として使用
+
+        // Chart.jsでグラフを描画
+        const ctx = document.getElementById('myChart').getContext('2d');
+        const myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Column 3 Data',
+                    data: values,
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    })
+    .catch(error => console.error('Error fetching data:', error));
+</script>
 </body>
 </html>
