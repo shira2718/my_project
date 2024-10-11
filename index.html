@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイムデータグラフ</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let myChart;
+
+        async function fetchData() {
+            try {
+                const response = await fetch('http://localhost:5000/data');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+
+                // データをグラフ用に加工
+                const labels = data.map(item => item.column1); // column1をラベルに
+                const values = data.map(item => item.column3); // column3を値に
+
+                updateChart(labels, values);
+            } catch (error) {
+                console.error('Fetch error:', error);
+            }
+        }
+
+        function updateChart(labels, values) {
+            if (myChart) {
+                myChart.data.labels = labels;
+                myChart.data.datasets[0].data = values;
+                myChart.update();
+            } else {
+                const ctx = document.getElementById('myChart').getContext('2d');
+                myChart = new Chart(ctx, {
+                    type: 'line', // グラフの種類
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'データセット',
+                            data: values,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // 定期的にデータを取得 (1秒ごと)
+        setInterval(fetchData, 1000); // 1秒ごとにデータを取得
+    </script>
+</head>
+<body>
+    <h1>リアルタイムデータグラフ</h1>
+    <canvas id="myChart" width="400" height="200"></canvas>
+</body>
+</html>

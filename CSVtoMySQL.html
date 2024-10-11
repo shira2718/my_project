@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Upload</title>
+</head>
+<body>
+    <h1>Upload CSV to MySQL</h1>
+    <input type="file" id="csvFile" accept=".csv">
+    <button id="uploadButton">Upload CSV</button>
+    <p id="responseMessage"></p>
+
+    <script>
+        document.getElementById('uploadButton').addEventListener('click', () => {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+            const formData = new FormData();
+
+            if (!file) {
+                alert('Please select a CSV file to upload.');
+                return;
+            }
+
+            formData.append('file', file);
+
+            fetch('http://127.0.0.1:5001/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('responseMessage').innerText = 'CSV uploaded successfully!';
+            })
+            .catch(error => {
+                document.getElementById('responseMessage').innerText = 'Error uploading CSV: ' + error.message;
+            });
+        });
+    </script>
+</body>
+</html>
