@@ -2,7 +2,7 @@ from flask import Flask, jsonify, make_response
 from flask_cors import CORS
 import mysql.connector
 import pandas as pd
-import os
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -10,10 +10,10 @@ CORS(app)
 # MySQLに接続
 def get_db_connection():
     return mysql.connector.connect(
-        host=os.getenv('MYSQLHOST'),        # 環境変数からホスト名を取得
-        user=os.getenv('MYSQLUSER'),        # 環境変数からユーザー名を取得
-        password=os.getenv('MYSQLPASSWORD'), # 環境変数からパスワードを取得
-        database=os.getenv('MYSQLDATABASE')  # 環境変数からデータベース名を取得
+        host='localhost',
+        user='root',
+        password='shtky2718',
+        database='test_db'  # 使用するデータベース名
     )
 
 @app.route('/data', methods=['GET'])
