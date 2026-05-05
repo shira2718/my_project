@@ -1,0 +1,835 @@
+
+
+
+#include <xc.h>
+#include "./USB/usb.h"
+#include "./USB/usb_function_cdc.h"
+#include "HardwareProfile - PIC18F14K50.h"
+#include "GenericTypeDefs.h"
+#include "Compiler.h"
+#include "usb_config.h"
+#include "USB/usb_device.h"
+
+
+// コンフィギュレーションの設定
+// ここで記述がない設定はデフォルト値で動作します。
+#pragma config CPUDIV = NOCLKDIV// システムクロックの分周はしない
+#pragma config USBDIV = OFF		// 分周なしでUSBクロックを直接供給(ロースピード時)
+#pragma config FOSC   = ECH//HS		// システムクロックは外部で高い振動子を使用する
+#pragma config PLLEN  = ON		// 動作クロックを４倍で動作させる
+#pragma config PCLKEN = ON		// プライマリシステムクロックを有効にする
+#pragma config FCMEN  = OFF		// 外部オシレータに障害が発生した場合に内部オシレータに切替えない
+#pragma config IESO   = OFF		// 外部・内部ｸﾛｯｸの切替えでの起動はしない
+#pragma config PWRTEN = OFF		// 電源ONから後65.6msにﾌﾟﾛｸﾞﾗﾑを開始させない
+#pragma config BOREN  = OFF		// 電源電圧降下常時監視機能はＯＦＦ
+#pragma config BORV   = 30		// 監視電圧は(3.0V)に設定
+#pragma config WDTEN  = OFF		// ウォッチドッグタイマは使用しない
+#pragma config WDTPS  = 32768	// ウォッチドッグタイマ有効時のタイマ値の設定
+#pragma config MCLRE  = OFF		// MCLRピンは無効に設定(RA3入力ピンを有効にする)
+#pragma config HFOFST = OFF		// オシレータが安定してからシステムクロックを供給する
+#pragma config STVREN = ON		// スタックのアンダー・フルのオーバが発生した時にリセットを行う
+#pragma config LVP    = OFF		// 低電圧ICSPプログラミングを使用しない(RC3のピンが利用可能になる)
+#pragma config XINST  = OFF		// 拡張命令は使用しない
+
+////
+unsigned char tm_disp[6], tmp_disp[3];
+#include <./i2c.h> 
+////
+#include "usb_set.h"
+////
+#define T0NUM_SET	0x6D84 //65536-37500
+//#define T0NUM_SET	0x9E58 //65536-25000
+
+
+void code(unsigned char);
+void RGBdata(unsigned char,unsigned char,unsigned char);
+void GRB_tblRD(unsigned char *, int);
+void RGBdata_send();
+
+///////////
+void wait(int );
+void delay_us(int );
+volatile unsigned char g_TimeCnt=0;
+//volatile unsigned short g_TimeCnt=0;
+
+unsigned int  cnt100ms=0, cnt1s=0, cnt1min=0, cnt1hr=0, cnt6s=0;
+
+#define pw_cycle_term 10
+unsigned int  pw_cycle_cnt=0,pw_cycle_lv=0,pw_cycle_I_lv=0;
+int I_tpr;
+///////////
+int ct_bit;
+unsigned char bitdata[60];//[240];
+
+#define CCPR_offset 25*6
+unsigned short CCPR_CNT = 0x8DBE + CCPR_offset;
+int angle_Dir=1;
+
+enum status{
+	busy,
+	active,
+	standby,
+	initial
+	};
+enum LED_status{
+	still,
+	already
+	};
+enum tpr_set_lv_status{
+	tpr_set_lv_high,
+	tpr_set_lv_low,
+	tpr_set_lv_init
+	};
+
+enum status stat	=	initial;
+enum LED_status LED_stat	=	still;
+enum tpr_set_lv_status tpr_set_lv	=	 tpr_set_lv_init;
+
+/*******************************************************************************
+*  メインの処理                                                                *
+*******************************************************************************/
+void main(void)
+{
+     OSCCON = 0b00000000 ;     // 外部クロックとする(12MHz x 4倍 = 48MHz)
+//     OSCCON = 0b01110110 ;     // 外部クロックとする(12MHz x 4倍 = 48MHz)
+
+     ANSEL  = 0b00000000 ;     // ANS3-7 アナログは使用しない、デジタルI/Oに割当
+     ANSELH = 0b00000000 ;     // ANS8-11アナログは使用しない、デジタルI/Oに割当
+     TRISA  = 0b00100000 ;     // 1で入力 0で出力 RA4-RA5全て出力に設定(RA3は入力専用)
+     TRISB  = 0b00000000 ;     // RB4-RB7全て出力に設定 
+ //    TRISC  = 0b00000011 ;     // RC0-RC7全て出力に設定 
+     PORTA  = 0b00000000 ;     // 出力ピンの初期化(全てLOWにする)
+     PORTB  = 0b00000000 ;     // 出力ピンの初期化(全てLOWにする)
+     PORTC  = 0b00000000 ;     // 出力ピンの初期化(全てLOWにする)
+
+//     USBDeviceInit() ;         // ＵＳＢの初期化を行う(フルスピードで内部プルアップ有り)
+
+
+ int i,rotate=0;
+int LED_num=0;
+unsigned short tmp_stat,tmp_stat_cnt;
+
+ 	stat	=	initial;
+    OSCCON = 0b01110000;         // 内部クロック16Mhz
+
+    LATC = 0;                    // PortCのすべてのビットを「０」
+    TRISC = 0b10000000;          // ポートを出力に設定/RC7入力
+//    TRISC = 0b00000000;          // ポートを出力に設定
+
+////////////
+      T0CON  = 0b10000100;	//32 prescale: 12MHz/32=375kHz,T0CS=0
+//      T0CON  = 0b10100100;	//32 prescale: 12MHz/32=375kHz,T0CS=1
+//      T0CON  = 0b10000011;	//32 prescale: 4MHz/16=250kHz,T0CS=0
+
+    INTCON2bits.TMR0IP = 1;                // Timer 0 からの割込みを高優先に設定
+    INTCONbits.TMR0IF = 0;                // Timer 0 からの割込みフラッグをクリア
+	INTCONbits.TMR0IE = 1;                // Timer 0 からの割込みを許可
+  
+////////////
+    T1CON  = 0b10110001;                // Timer 1 設定(1:8 prescle)
+    IPR1bits.TMR1IP = 0;//1;                // Timer 1 からの割込みを低優先に設定
+    PIR1bits.TMR1IF = 0;                // Timer 1 からの割込みフラッグをクリア
+////////////
+    T3CON	= 0b10111001;                // Timer 3 設定
+    CCP1CON	= 0b00001010;//0b00001000;              // CCP1 設定
+
+    CCP1IP	= 0;
+    CCP1IF	= 0;
+    CCP1IE	= 1;
+
+	CCPR1H	= 0x8D;	
+	CCPR1L	= 0xBE;
+
+
+    TMR3IP = 0;//1;                // Timer 3 からの割込みを低優先に設定
+    TMR3IF = 0;                // Timer 3 からの割込みフラッグをクリア
+    TMR3IE = 1;                // Timer 3 からの割込みを許可 
+
+
+    //割り込み　全体許可
+    RCONbits.IPEN = 1;          /*多重割り込み許可*/
+    INTCONbits.GIEH=1;      // 高優先割込みを許可
+    INTCONbits.GIEL=1;      // 低優先割込みを許可
+////////////
+///////////
+      PICinit();      //PICを初期化
+
+      LCD_Init();
+      writeCommand(0x01); //画面をクリア
+      __delay_ms(20);
+      writeCommand(0x02); //ホームへカーソル移動
+      __delay_ms(2); // LCD側の処理待ち
+///////////
+	I2C_Tsensor_init();
+//	I2C_Tsensor_CFG();
+///////////
+	writeCommand(0x02);   //ホームへカーソル移動
+	LCD_str(moji);
+ 	stat	=	standby;
+
+	unsigned int rc3_cnt = 0;
+	unsigned char rc3_state = 0; // 0=ON, 1=OFF
+
+    while(1){                    // 繰り返しループ
+
+/*
+//////////// 	
+	if(stat	==	active){
+
+	     LC5 = 0b1 & ~LC5;
+		 wait(14);
+
+		}else{
+
+	      LC5 = 0b1;
+		 __delay_us(50);
+	      LC5 = 0b0;
+		 wait(50);
+
+		}
+////////////
+*/
+		if(cnt100ms >= 10){
+			cnt100ms=0;
+////////////
+			rc3_cnt++;
+			
+			if(rc3_state == 0){
+			    // ON 6秒
+			    RC3 = 1;
+			
+			    if(rc3_cnt >= 6){   // 6秒 = 60×100ms
+			        rc3_cnt = 0;
+			        rc3_state = 1;
+			    }
+			
+			}else{
+			    // OFF 4秒
+			    RC3 = 0;
+			
+			    if(rc3_cnt >= 4){   // 4秒 = 40×100ms
+			        rc3_cnt = 0;
+			        rc3_state = 0;
+			    }
+			}
+////////////
+
+
+
+			cnt1s++;
+
+			cnt6s++;
+			if(cnt6s == 6){
+				cnt6s = 0;
+				LED_stat	=	still;
+
+			}
+
+			pw_cycle_cnt++;
+			if(pw_cycle_cnt == pw_cycle_term){
+				pw_cycle_cnt = 0;
+			}
+
+			if(cnt1s == 60){
+				cnt1s = 0;
+				cnt1min++;
+			}
+
+
+			if(cnt1min == 60){
+				cnt1min = 0;
+				cnt1hr++;
+			}
+            writeCommand(0x06+0x80); 
+		    LCD_time(cnt1hr, cnt1min, cnt1s);
+
+	        writeCommand(0x43+0x80); //2列目へ移動
+			LCD_Tsens1();
+
+	        writeCommand(0x40+0x80); //2列目へ移動
+	        if(tpr_AQ < 20.0*16){
+//	          writeCommand(0x07+0x80); 
+			LCD_str("1D ");
+//////					LC3 = 0b1;
+			}else{
+//	          writeCommand(0x07+0x80); 
+	        LCD_str("1W ");
+//////					LC3 = 0b0;
+			}
+
+	        writeCommand(0x4B+0x80); //2列目へ移動
+			LCD_Tsens2();
+
+	        writeCommand(0x48+0x80); //2列目へ移動
+	        if(pw_cycle_cnt < pw_cycle_lv + pw_cycle_I_lv){
+//	          writeCommand(0x07+0x80); 
+			LCD_str("2D ");
+					LC4 = 0b1;
+			}else{
+//	          writeCommand(0x07+0x80); 
+	        LCD_str("2W ");
+					LC4 = 0b0;
+			}
+
+
+//	          writeCommand(0x02);   //ホームへカーソル移動
+//	          LCD_str(moji11);
+//	          writeCommand(0x40+0x80); //2列目へ移動
+//	          LCD_time(cnt1hr, cnt1min, cnt1s);
+
+///////////
+//			if(cnt1min % 2==0){
+//			if(tpr < 25.0 *16){
+//			if(tpr < 20.0 *16){
+/*
+			if(tpr < 36.0 *16){
+			 	stat	=	active;
+			}else{
+				pw_cycle_lv=0;
+ 				stat	=	standby;
+			}
+
+
+			if(		tpr < 33.5 *16){
+			 	pw_cycle_lv=10;
+
+			}else if(	tpr < 34.0 *16){
+				pw_cycle_lv=8;
+
+			}else if(	tpr < 34.5 *16){
+				pw_cycle_lv=6;
+
+			}else if(	tpr < 35.0 *16){
+				pw_cycle_lv=4;
+
+			}
+
+			if(	tpr < 35.0 *16){
+
+			}else if(	tpr < 35.5 *16){
+				pw_cycle_lv=2;
+
+			}else if(	tpr < 36.0 *16){
+				pw_cycle_lv=1;
+
+			}
+*/
+/*
+			if(tpr < 36.5 *16){
+			 	stat	=	active;
+			}else{
+				pw_cycle_lv=0;
+ 				stat	=	standby;
+			}
+
+
+			if(		tpr < 34.0 *16){
+			 	pw_cycle_lv=10;
+
+			}else if(	tpr < 34.5 *16){
+				pw_cycle_lv=8;
+
+			}else if(	tpr < 35.0 *16){
+				pw_cycle_lv=6;
+
+			}else if(	tpr < 35.5 *16){
+				pw_cycle_lv=4;
+
+			}
+
+			if(	tpr < 35.5 *16){
+
+			}else if(	tpr < 36.0 *16){
+				pw_cycle_lv=2;
+
+			}else if(	tpr < 36.5 *16){
+				pw_cycle_lv=1;
+
+			}
+*/
+		writeCommand(0x4F+0x80); //2列目へ移動
+		if(RC7==1){
+			tpr_set_lv	=	tpr_set_lv_high;
+//			LCD_str("H");
+			if(pw_cycle_I_lv==0){
+				LCD_str("O");
+			}else if(pw_cycle_I_lv==1){
+				LCD_str("P");
+			}else if(pw_cycle_I_lv==2){
+				LCD_str("Q");
+			}
+
+
+
+		}else{
+			tpr_set_lv	=	tpr_set_lv_low;
+//			LCD_str("L");
+			if(pw_cycle_I_lv==0){
+				LCD_str("O");
+			}else if(pw_cycle_I_lv==1){
+				LCD_str("P");
+			}else if(pw_cycle_I_lv==2){
+				LCD_str("Q");
+			}
+
+		}
+
+
+		if(tpr_set_lv	==	tpr_set_lv_low){
+	
+///////
+
+/*
+			if(cnt1s == 60 && tpr!=0xFFFF){
+				if(I_tpr + 37.0 *16 - (int)tpr > 1000 		&& 0 <= 37.0 *16 - (int)tpr){
+					I_tpr = 1000;
+				}else if(I_tpr + 37.0 *16 - (int)tpr < -1000 && 0 > 37.0 *16 - (int)tpr){
+					I_tpr = -1000;
+				}else {
+					I_tpr += 37.0 *16 - (int)tpr;
+				}
+			}
+*/
+//			if(cnt1s % 10 == 0){
+				I_tpr += 37.0 *16 - (int)tpr;
+//			}
+
+			if(I_tpr >10000){
+				I_tpr = 10000;
+			}else if(I_tpr <3000){
+				I_tpr = 3000;
+			}
+
+
+
+			if(I_tpr >600*16){
+				pw_cycle_I_lv = 2;
+			}else if(I_tpr >300*16){
+				pw_cycle_I_lv = 1;
+			}else {
+				pw_cycle_I_lv = 0;
+			}
+///////
+
+			if(tpr < 37.0 *16){
+			 	stat	=	active;
+			}else{
+				pw_cycle_lv=0;
+ 				stat	=	standby;
+			}
+
+
+			if(		tpr < 34.5 *16){
+			 	pw_cycle_lv=10;
+
+			}else if(	tpr < 35.0 *16){
+				pw_cycle_lv=8;
+
+			}else if(	tpr < 35.5 *16){
+				pw_cycle_lv=6;
+
+			}else if(	tpr < 36.0 *16){
+				pw_cycle_lv=4;
+
+			}
+
+			if(	tpr < 36.0 *16){
+
+			}else if(	tpr < 36.5 *16){
+				pw_cycle_lv=4;
+
+			}else if(	tpr < 37.0 *16){
+				pw_cycle_lv=2;
+
+			}
+
+		}else{
+
+///////
+/*
+			if(cnt1s == 0 && tpr!=0xFFFF){
+				if(I_tpr + 37.5 *16 - (int)tpr > 1000 		&& 0 <= 37.5 *16 - (int)tpr){
+					I_tpr = 1000;
+				}else if(I_tpr + 37.5 *16 - (int)tpr < -1000 && 0 > 37.5 *16 - (int)tpr){
+					I_tpr = -1000;
+				}else {
+					I_tpr += 37.5 *16 - (int)tpr;
+				}
+			}
+*/
+//			if(cnt1s % 10 == 0){
+					I_tpr += 37.5 *16 - (int)tpr;
+//			}
+
+			if(I_tpr >10000){
+				I_tpr = 10000;
+			}else if(I_tpr <3000){
+				I_tpr = 3000;
+			}
+
+
+
+			if(I_tpr >600*16){
+				pw_cycle_I_lv = 2;
+			}else if(I_tpr >300*16){
+				pw_cycle_I_lv = 1;
+			}else {
+				pw_cycle_I_lv = 0;
+			}
+///////
+
+			if(tpr < 37.5 *16){
+			 	stat	=	active;
+			}else{
+				pw_cycle_lv=0;
+ 				stat	=	standby;
+			}
+
+
+			if(		tpr < 35.0 *16){
+			 	pw_cycle_lv=10;
+
+			}else if(	tpr < 35.5 *16){
+				pw_cycle_lv=8;
+
+			}else if(	tpr < 36.0 *16){
+				pw_cycle_lv=6;
+
+			}else if(	tpr < 36.5 *16){
+				pw_cycle_lv=4;
+
+			}
+
+			if(	tpr < 36.5 *16){
+
+			}else if(	tpr < 37.0 *16){
+				pw_cycle_lv=4;
+
+			}else if(	tpr < 37.5 *16){
+				pw_cycle_lv=2;
+
+			}
+		}
+
+/*
+			if(tpr < 38.0 *16){
+			 	stat	=	active;
+			}else{
+				pw_cycle_lv=0;
+ 				stat	=	standby;
+			}
+
+
+			if(		tpr < 35.5 *16){
+			 	pw_cycle_lv=10;
+
+			}else if(	tpr < 36.0 *16){
+				pw_cycle_lv=8;
+
+			}else if(	tpr < 36.5 *16){
+				pw_cycle_lv=6;
+
+			}else if(	tpr < 37.0 *16){
+				pw_cycle_lv=4;
+
+			}
+
+			if(	tpr < 37.0 *16){
+
+			}else if(	tpr < 37.5 *16){
+				pw_cycle_lv=2;
+
+			}else if(	tpr < 38.0 *16){
+				pw_cycle_lv=1;
+
+			}
+*/
+
+
+
+/*
+///////////
+//////////////USB/////////////
+//	if( cnt100ms==0  &&  cnt1s==0 ){
+	if( cnt100ms==0 ){
+          // 割込みで処理する場合
+          #if defined(USB_INTERRUPT)
+               // USBバス(D+/D-)の端子を監視する処理
+               if(USB_BUS_SENSE && (USBGetDeviceState() == DETACHED_STATE)) {
+                    USBDeviceAttach() ;
+               }
+          #endif
+          // USBホストからSETUPパケットを受けてポーリングで処理する場合
+          #if defined(USB_POLLING)
+               USBDeviceTasks() ;
+          #endif
+          // ＵＳＢのメイン処理
+          ProcessUSB() ;
+	}
+///////////////////////////
+*/
+		}//cnt100ms==0 
+
+
+//////
+/*
+	if(cnt1s%2==0){
+
+		angle_time = 0;
+
+		LC6=1;
+		 delay_us(1000 + angle_time);
+		LC6=0;
+		 delay_us(20000 -1000 - angle_time);
+	}else{
+
+		angle_time = 1000;
+
+		LC6=1;
+		 delay_us(1000 + angle_time);
+		LC6=0;
+		 delay_us(20000 -1000 - angle_time);
+	}
+*/
+
+/*
+	if(angle_Dir==1){
+
+		if(angle_time + 1900/100<1900){
+			angle_time += 1900/100;
+		}else{
+			angle_Dir = -1;
+		}
+
+	}else{
+	
+		if(angle_time - 1900/100>=0){
+			angle_time -= 1900/100;
+		}else{
+			angle_Dir = 1;
+		}
+	}
+*/
+/*
+	if(angle_Dir==1){
+
+		if(angle_time + 1<1900/2){
+			angle_time += 1;
+		}else{
+			angle_Dir = -1;
+		}
+
+	}else{
+	
+		if(angle_time - 1>=0){
+			angle_time -= 1;
+		}else{
+			angle_Dir = 1;
+		}
+	}
+
+		LC6=1;
+		 delay_us(angle_time);
+		 __delay_us(500);
+		LC6=0;
+		 delay_us(5000 -500 - angle_time);
+		 __delay_ms(15);
+*/
+//////
+
+
+		if(stat	== active  &&  LED_stat	==	still){
+		 	stat	=	busy;
+			ct_bit=0;	//	RGBdata_start();
+		
+//				GRB_tblRD(GRB_tbl0,rotate);
+
+
+//		LC4 = 0b1;
+
+			while(tmp_stat_cnt  >= T0NUM_SET+ 37500/10*2){ 
+				tmp_stat_cnt 		=	*(unsigned short *)(& TMR0L);
+				tmp_stat_cnt 		=	*(unsigned short *)(& TMR0L);
+			 }
+
+
+//     	 LC4 = 0b0; 
+		
+			wait(1);//	RGBdata_end();
+//		for(i=0;i<5;i++){wait(100);}
+
+
+
+
+
+//			LED_stat	=	still;
+
+
+////////////
+//	      LC5 = 0b1 & ~LC5;
+//		wait(100);
+////////////
+
+
+//			if(rotate>=30){
+			if(rotate>=30-3){
+				rotate=0;
+				LED_num = 0b1 & ~LED_num;
+			}else{
+				rotate+=3;
+			}
+
+			LED_stat	=	already;
+		 	stat	=	active;
+		    } 
+
+		wait(1);
+////////////
+	} //while
+    
+    
+    
+}
+
+
+
+void interrupt high_priority YourHighPriorityISRCode(void){	//100msカウント
+/*
+     #if defined(USB_INTERRUPT)
+          USBDeviceTasks();
+     #endif
+*/
+//////////////
+	int i;
+//////////////
+//	GIE=0;
+    if(INTCONbits.TMR0IF){            //Timer0からの割込みを確認
+//		TMR0H = 0x3C;
+//		TMR0L = 0xB0;
+
+		TMR0H = T0NUM_SET>>8;
+		TMR0L = 0xFF & T0NUM_SET;
+
+        	INTCONbits.TMR0IF = 0;        // 割込みフラッグをクリア
+		cnt100ms++;
+////
+		if(angle_Dir==1){
+	
+			if(CCPR_CNT < 0x8DBE + 114*25){
+				CCPR_CNT += 25;
+			}else{
+				angle_Dir = -1;
+			}
+	
+		}else{
+		
+			if(CCPR_CNT - 25 >= 0x8DBE + CCPR_offset){
+				CCPR_CNT -= 25;
+			}else{
+				angle_Dir = 1;
+			}
+		}
+////
+
+    }
+
+/*
+///////////
+    if(PIR1bits.TMR1IF){            //Timer1からの割込みを確認
+//////////////
+	for(i=0;i<100000;i++){}
+//////////////
+		TMR1H = 0xFE;
+		TMR1L = 0x0C;
+
+        PIR1bits.TMR1IF = 0;        // 割込みフラッグをクリア
+
+        g_TimeCnt++;//functionの時間計測で使用
+    }
+///////////
+*/
+
+}
+
+
+void interrupt low_priority YourLowPriorityISRCode(void){
+
+    if(PIR1bits.TMR1IF){            //Timer1からの割込みを確認
+				//500-10times
+		TMR1H = 0xFE;
+		TMR1L = 0x18;
+
+        PIR1bits.TMR1IF = 0;        // 割込みフラッグをクリア
+
+        g_TimeCnt++;//functionの時間計測で使用
+    }
+
+   if(CCP1IF){            //Timer3からの割込みを確認
+
+	    LC5 = 0b0;
+        CCP1IF = 0;        // 割込みフラッグをクリア
+    }
+
+   if(TMR3IF){            //Timer3からの割込みを確認
+////
+//	CCPR_CNT = 0x8DBE;
+
+		CCPR1H	= 0xFF & (CCPR_CNT>>8);	
+		CCPR1L	= 0xFF &  CCPR_CNT;
+////
+		TMR3H = 0x8A;
+		TMR3L = 0xD0;
+	    LC5 = 0b1;
+        TMR3IF = 0;        // 割込みフラッグをクリア
+    }
+
+
+}
+
+
+//時間を待たせるだけのプログラム
+void wait(int time){
+	int g_TimeCnt_tmp=0;
+
+	    g_TimeCnt=0;
+////////
+				//500-6times
+		TMR1H = 0xFE;
+		TMR1L = 0x12;
+
+		TMR1H = 0xFE;
+		TMR1L = 0x12;
+
+		TMR1H = 0xFE;
+		TMR1L = 0x12;
+
+		TMR1H = 0xFE;
+		TMR1L = 0x12;
+
+//		TMR1H = 0xFE;
+//		TMR1L = 0x0C;
+//////////
+	    PIR1bits.TMR1IF = 0;        // 割込みフラッグをクリア
+	    PIE1bits.TMR1IE = 1;                // Timer 1 からの割込みを許可
+  
+
+	    while( g_TimeCnt_tmp+g_TimeCnt < time  ){
+		    if(g_TimeCnt == 200 ){
+				g_TimeCnt_tmp +=200;
+				g_TimeCnt=0;
+	 		}
+ 		}
+
+
+
+
+	    PIE1bits.TMR1IE = 0;                // Timer 1 からの割込みを禁止
+}
+
+
+void delay_us(int time){
+	int i;
+	for(i=0;i<time;i++){
+			 __delay_us(1);
+	}
+}

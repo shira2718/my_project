@@ -1,0 +1,315 @@
+// PIC16F1938 Configuration Bit Settings
+
+    // 'C' source line config statements
+/*
+    // CONFIG1
+    #pragma config FOSC = INTOSC    // Oscillator Selection (INTOSC oscillator: I/O function on CLKIN pin)
+    #pragma config WDTE = OFF       // Watchdog Timer Enable (WDT disabled)
+    #pragma config PWRTE = OFF      // Power-up Timer Enable (PWRT disabled)
+    #pragma config MCLRE = OFF      // MCLR Pin Function Select (MCLR/VPP pin function is digital input)
+    #pragma config CP = OFF         // Flash Program Memory Code Protection (Program memory code protection is disabled)
+    #pragma config CPD = OFF        // Data Memory Code Protection (Data memory code protection is disabled)
+    #pragma config BOREN = OFF      // Brown-out Reset Enable (Brown-out Reset disabled)
+    #pragma config CLKOUTEN = OFF   // Clock Out Enable (CLKOUT function is disabled. I/O or oscillator function on the CLKOUT pin)
+    #pragma config IESO = OFF       // Internal/External Switchover (Internal/External Switchover mode is disabled)
+    #pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enable (Fail-Safe Clock Monitor is disabled)
+
+    // CONFIG2
+    #pragma config WRT = OFF        // Flash Memory Self-Write Protection (Write protection off)
+    #pragma config VCAPEN = OFF     // Voltage Regulator Capacitor Enable (All VCAP pin functionality is disabled)
+    #pragma config PLLEN = ON// PLL Enable (4x PLL disabled)
+    #pragma config STVREN = ON      // Stack Overflow/Underflow Reset Enable (Stack Overflow or Underflow will cause a Reset)
+    #pragma config BORV = LO        // Brown-out Reset Voltage Selection (Brown-out Reset Voltage (Vbor), low trip point selected.)
+    #pragma config LVP = ON         // Low-Voltage Programming Enable (Low-voltage programming enabled)
+*/
+/*
+#include <xc.h>                  // PIC のハードウエア定義
+
+//#pragma config FOSC   = IRC, PLLEN  = ON,  FCMEN  = OFF
+#pragma config FOSC   = IRC, PLLEN  = ON,  FCMEN  = OFF
+
+#pragma config IESO   = OFF, USBDIV = OFF, CPUDIV = NOCLKDIV
+#pragma config PWRTEN = OFF, BOREN  = OFF, WDTEN  = OFF
+#pragma config HFOFST = OFF, MCLRE  = OFF
+#pragma config STVREN = ON,  BBSIZ  = OFF, LVP    = OFF
+#pragma config XINST  = OFF
+#pragma config CP0    = OFF, CP1    = OFF, CPB    = OFF
+#pragma config WRT0   = OFF, WRT1   = OFF, WRTB   = OFF, WRTC   = OFF
+#pragma config EBTR0  = OFF, EBTR1  = OFF, EBTRB  = OFF
+
+#pragma config PLLEN = ON// PLL Enable (4x PLL disabled)
+*/
+//#define T0NUM_SET	0x6D84
+
+    // #pragma config statements should precede project file includes.
+    // Use project enums instead of #define for ON and OFF.
+
+
+    #define _XTAL_FREQ 48000000	//16000000z
+    #define LCD_ADD 0x7C
+    #define Tsens_S5851A_1_ADD 0x9E//0x94
+    #define Tsens_S5851A_2_ADD 0x92
+
+    char moji[] = "Hello, PIC World!";
+    char moji11[] = "Hello1, PIC World!";
+    char moji12[] = "Hello2, PIC World!";
+    char moji2[] = "Wak-tech";
+    unsigned short tpr, tpr_AQ;
+
+    void I2C_Master_Init(const unsigned long c)
+    {
+      SSPCON1 = 0b00101000;
+      SSPCON2 = 0;
+      SSPADD =(_XTAL_FREQ/(4*c))-1;
+      SSPSTAT = 0b00000000 ;    // 標準速度モードに設定する(100kHz)
+    }
+
+    void I2C_Master_Wait()
+    {
+      while ((SSPSTAT & 0x04) || (SSPCON2 & 0x1F));
+    }
+
+    void I2C_Master_Start()
+    {
+      I2C_Master_Wait();
+      SEN = 1;
+    }
+
+    void I2C_Master_RepeatedStart()
+    {
+      I2C_Master_Wait();
+      RSEN = 1;
+    }
+
+    void I2C_Master_Stop()
+    {
+      I2C_Master_Wait();
+      PEN = 1;
+    }
+
+    void I2C_Master_Write(unsigned d)
+    {
+      I2C_Master_Wait();
+      SSPBUF = d;
+    }
+    void writeData(char t_data){
+        I2C_Master_Start();
+        I2C_Master_Write(LCD_ADD);
+        I2C_Master_Write(0x40);
+        I2C_Master_Write(t_data);
+        I2C_Master_Stop();
+        __delay_ms(1);//(10);
+    }
+    void writeCommand(char t_command){
+        I2C_Master_Start();
+        I2C_Master_Write(LCD_ADD);
+        I2C_Master_Write(0x00);
+        I2C_Master_Write(t_command);
+        I2C_Master_Stop();
+        __delay_ms(1);//(10);
+    }
+    void PICinit(){
+      OSCCON = 0b01110000;
+      ANSEL = 0b00000000;
+//      TRISA  = 0b00000000;
+      TRISB  = 0b01010000;
+//      TRISC  = 0b00011000;
+//      PORTA  = 0b00000000;    //2進数で書いた場合
+//      PORTB  = 0x00;          //16進数で書いた場合
+    }
+    void LCD_Init(){            //LCDの初期化
+      I2C_Master_Init(100000);
+      __delay_ms(400);
+      writeCommand(0x38);
+      __delay_ms(20);
+      writeCommand(0x39);
+      __delay_ms(20);
+      writeCommand(0x14);
+      __delay_ms(20);
+      writeCommand(0x73);
+      __delay_ms(20);
+      writeCommand(0x52);
+      __delay_ms(20);
+      writeCommand(0x6C);
+      __delay_ms(250);
+      writeCommand(0x38);
+      __delay_ms(20);
+      writeCommand(0x01);
+      __delay_ms(20);
+      writeCommand(0x0C);
+      __delay_ms(20);
+    }
+
+    void LCD_str(char *c) {     //LCDに配列の文字を表示
+      unsigned char i,wk;
+      for (i=0 ; ; i++) {
+        wk = c[i];
+        if  (wk == 0x00) {break;}
+        writeData(wk);
+      }
+    }
+
+static unsigned char I2C_rcv() {
+	   SSPIF = 0;
+	   RCEN = 1;
+	   while (RCEN) {}
+
+	return(SSPBUF);
+}
+
+static void I2C_nacksnd() {
+	   ACKDT = 1;
+	   ACKEN = 1;
+	   while (ACKEN) {}
+
+	return;
+}
+
+static void I2C_Tsensor_CFG(unsigned char Tsens_ADD) {
+
+	   I2C_Master_Start();
+//	   I2C_Master_Write(0x94 | 0x00);		//CONFIG_WRITE
+//	   I2C_Master_Write(Tsens_S5851A_ADD | 0x00);		//CONFIG_WRITE
+	   I2C_Master_Write(Tsens_ADD | 0x00);		//CONFIG_WRITE
+
+      __delay_ms(1);
+	   I2C_Master_Write(0x01);
+      __delay_ms(1);
+	   I2C_Master_Write(0x00);
+     __delay_ms(1);
+	   I2C_nacksnd();
+        I2C_Master_Stop();
+     __delay_ms(10);
+
+	return;
+}
+
+
+static void I2C_Tsensor_init() {
+
+	I2C_Tsensor_CFG(Tsens_S5851A_1_ADD);
+	I2C_Tsensor_CFG(Tsens_S5851A_2_ADD);
+
+	return;
+}
+
+
+static unsigned short I2C_Tsensor(unsigned char Tsens_ADD) {
+
+	   unsigned short tpr;
+	   unsigned char c;
+
+	   I2C_Master_Start();
+//	   I2C_Master_Write(0x94 | 0x00);		//DUMMYWRITE
+//	   I2C_Master_Write(Tsens_S5851A_ADD | 0x00);		//DUMMYWRITE
+	   I2C_Master_Write(Tsens_ADD | 0x00);		//DUMMYWRITE
+
+	   I2C_Master_Write(0x00);
+
+	   I2C_Master_Start();
+//	   I2C_Master_Write(0x94 | 0x01);		//READ
+//	   I2C_Master_Write(Tsens_S5851A_ADD | 0x01);		//READ
+	   I2C_Master_Write(Tsens_ADD | 0x01);		//READ
+      __delay_ms(5);
+
+//	   c = I2C_rcv();
+////
+	   SSPIF = 0;
+	   RCEN = 1;
+	   while (RCEN) {}
+	   c=(SSPBUF);
+	   ACKDT=0;
+	   ACKEN = 1;
+////
+
+	   tpr = (unsigned short)c<<4;
+     __delay_ms(1);
+//	   c = I2C_rcv();
+////
+	   RCEN = 1;
+	   while (RCEN) {}
+	   c=(SSPBUF);
+////
+
+
+	   tpr |= (unsigned short)c>>4;
+	   I2C_nacksnd();
+        I2C_Master_Stop();
+
+	return(tpr);
+}
+
+    void LCD_time(unsigned int hr,unsigned int min, unsigned int sec){
+      unsigned char i,wk,c;
+      unsigned short tmp;
+
+        writeData('t');
+//        writeData('i');
+        writeData('m');
+//        writeData('e');
+
+        tm_disp[0] = (hr/10)%10+0x30;
+        writeData(tm_disp[0]);
+        tm_disp[1] =( unsigned char) (hr%10)+0x30;
+        writeData(tm_disp[1]);
+
+        wk = ':';
+        writeData(wk);
+
+        tm_disp[2] = (min/10)%10+0x30;
+        writeData(tm_disp[2]);
+        tm_disp[3] = min%10+0x30;
+        writeData(tm_disp[3]);
+
+        wk = ':';
+        writeData(wk);
+
+        tm_disp[4] = (sec/10)%10+0x30;
+        writeData(tm_disp[4]);
+        tm_disp[5] = sec%10+0x30;
+        writeData(tm_disp[5]);
+////
+    }
+
+    void LCD_Tsens1(){
+      unsigned char i,wk,c;
+      unsigned short tmp;
+
+ 	   tpr_AQ=I2C_Tsensor(Tsens_S5851A_1_ADD);
+	   tmp=(tpr_AQ/16/10)%10;
+	   tmp_disp[0] = tmp+ 0x30;
+        writeData( tmp_disp[0] );
+
+	   tmp=(tpr_AQ/16)%10;
+	   tmp_disp[1] = tmp+ 0x30;
+        writeData( tmp_disp[1] );
+        writeData('.');
+
+	   tmp=(tpr_AQ & 0xF)*10;
+	   tmp=tmp/16;
+	   tmp_disp[2] = tmp+ 0x30;
+        writeData( tmp_disp[2] );
+////
+    }
+
+
+    void LCD_Tsens2(){
+      unsigned char i,wk,c;
+      unsigned short tmp;
+
+ 	   tpr=I2C_Tsensor(Tsens_S5851A_2_ADD);
+	   tmp=(tpr/16/10)%10;
+	   tmp_disp[0] = tmp+ 0x30;
+        writeData( tmp_disp[0] );
+
+	   tmp=(tpr/16)%10;
+	   tmp_disp[1] = tmp+ 0x30;
+        writeData( tmp_disp[1] );
+        writeData('.');
+
+	   tmp=(tpr & 0xF)*10;
+	   tmp=tmp/16;
+	   tmp_disp[2] = tmp+ 0x30;
+        writeData( tmp_disp[2] );
+////
+    }
