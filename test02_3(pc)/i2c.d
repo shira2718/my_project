@@ -1,0 +1,1 @@
+ i2c.d  i2c.p1:  C:/pic/PIC18F/test02/i2c.c
